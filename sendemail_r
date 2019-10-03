@@ -1,0 +1,29 @@
+library(mailR)
+library(shiny)
+
+
+ui <- fluidPage(
+    actionButton("sendMail","Send Mail")
+    
+)
+
+server <- function(input, output) {
+    observeEvent(input$sendMail,
+                 {
+                     sender <- "labknowledgedatabase@gmail.com"
+                     recipients <- c("ny2306@cumc.columbia.edu")
+                     body.string <- "words words words words words punchline"
+                     send.mail(from = sender,
+                               to = recipients,
+                               subject = "***STOPLOSS ALERT***",
+                               body = body.string,
+                               smtp = list(host.name = "smtp.gmail.com", port = 465, 
+                                           user.name = "labknowledgedatabase@gmail.com",            
+                                           passwd = "**", ssl = TRUE),
+                               authenticate = TRUE,
+                               send = TRUE)
+                 }
+    )
+}
+
+shinyApp(ui = ui, server = server)
