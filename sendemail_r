@@ -19,7 +19,7 @@ server <- function(input, output) {
                                body = body.string,
                                smtp = list(host.name = "smtp.gmail.com", port = 465, 
                                            user.name = "labknowledgedatabase@gmail.com",            
-                                           passwd = "**", ssl = TRUE),
+                                           passwd = "gata4nkx25", ssl = TRUE),
                                authenticate = TRUE,
                                send = TRUE)
                  }
