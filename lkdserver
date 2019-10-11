@@ -1,7 +1,8 @@
-##### LKD ####
+##### LKD #
 shinyServer(function(session,input, output) {
   seltest <- reactiveValues(ID="", Name="", EAP=numeric(),EPIC="")
   # selLabNo <- reactiveVal()
+  people <- reactiveVal()
   ostable <- reactiveVal()
   # selosid <- reactiveVal()
   osTestTable <- reactiveVal() # for individual os tab
@@ -10,9 +11,14 @@ shinyServer(function(session,input, output) {
   DTAdt <- reactiveVal()
   selDTA <- reactiveVal()
   OSTests <- reactiveVal() # for new os tab
-  #OSTestdt <- reactiveVal() # for new os tab
+  OSTestdt <- reactiveVal() # for new os tab
   Ordersetreview <- reactiveVal()# for new os tab
-  Compendium <- reactiveVal()# for new os tab
+  # user <- reactiveValues(email=character(),ID=numeric(), role=character()) # to track logedd in user
+  user <- reactiveValues(email='jls2282@cumc.columbia.edu',ID=60,role='Analyst') # REMOVE: DEV ONLY
+  # user <- reactiveValues(email='ny2306@cumc.columbia.edu',ID=71,role='Analyst') # REMOVE: DEV ONLY
+  changesdt <- reactiveVal() # for the entire Changes table
+  chgComdt <- reactiveVal() # for the current row being changed in changes table
+  chgComID <- reactiveVal() # to identify which comment is selected
   ############ input$tables handling and All tables tabPanel
   observeEvent(
     c(input$tables,input$FullTables),{
@@ -51,15 +57,21 @@ shinyServer(function(session,input, output) {
   observeEvent(
     input$send2,
     ostable({           
-    ost <- data.table(
-      dbGetQuery(
-        pool,
-        "SELECT OrderSetReview.IntOSId as ID, OrderSetReview.`EPIC No`, OrderSetReview.`Order Set Name`, CLGs.CLG, OrderSetReview.Status, FirstName, Analysts.LastName, OrderSetReview.`Date Scheduled/Added`, OrderSetReview.`Date Sent for Review`, OrderSetReview.`Date Approved`, OrderSetReview.DateSentToAnalyst, OrderSetReview.DateRevisedSpecsSent FROM (OrderSetReview LEFT JOIN CLGs ON OrderSetReview.CLG_ID = CLGs.CLG) LEFT JOIN Analysts ON OrderSetReview.Analyst = Analysts.ID;"
-      ))
-    datecols <- grep("date",colnames(ost),ignore.case = T)
-    ost[,(datecols):=lapply(.SD,function(x) 
-      as.POSIXct(as.Date(x),origin="1970-01-01")),.SDcols=datecols]
-  }) # end reactVal ostable
+      ost <- data.table(
+        dbGetQuery(
+          pool,{"
+        SELECT 
+          OrderSetReview.IntOSId as ID, OrderSetReview.`EPIC No`, OrderSetReview.`Order Set Name`, 
+          CLGs.CLG, OrderSetReview.Status, FirstName, Analysts.LastName, OrderSetReview.`Date Scheduled/Added`, 
+          OrderSetReview.`Date Sent for Review`, OrderSetReview.`Date Approved`, OrderSetReview.DateSentToAnalyst, 
+          OrderSetReview.DateRevisedSpecsSent 
+        FROM (OrderSetReview LEFT JOIN CLGs ON OrderSetReview.CLG_ID = CLGs.CLG) 
+        LEFT JOIN Analysts ON OrderSetReview.Analyst = Analysts.ID;"}
+        ))
+      datecols <- grep("date",colnames(ost),ignore.case = T)
+      ost[,(datecols):=lapply(.SD,function(x) 
+        as.POSIXct(as.Date(x),origin="1970-01-01")),.SDcols=datecols]
+    }) # end reactVal ostable
     ,ignoreNULL = FALSE) # end observeEvent input$send2
   
   output$os <- renderDT(
@@ -84,16 +96,22 @@ shinyServer(function(session,input, output) {
       updateTabsetPanel(session,"TabSet1", selected='individualOS')})
   # osProxy <- DT::dataTableProxy('os')
   output$osid <- renderText(
-    paste(ostable()[input$os_rows_selected,1:4],collapse =  " - ")
+    paste(ostable()[input$os_rows_selected,.(
+      ID,`EPIC No`,`Order Set Name`,CLG,Status,as.character(
+        as.Date(max(`Date Approved`,DateRevisedSpecsSent,na.rm=T))))],collapse =  " - ")
   )
   
 
   output$indos <- renderDT({
     osTestTable( 
       data.table(
-        dbGetQuery(pool,paste0(
-          "SELECT * FROM (Test2OS LEFT JOIN CompendiumT ON Test2OS.TestID = CompendiumT.Millennium) LEFT JOIN Headers ON Test2OS.headerID = Headers.ID WHERE Test2OS.OSID = '",
-          ostable()[input$os_rows_selected,1],"' ORDER by Test2OS.Sort;")
+        dbGetQuery(pool,paste0({"
+          SELECT * 
+          FROM (Test2OS LEFT JOIN CompendiumT ON Test2OS.TestID = CompendiumT.Millennium) 
+          LEFT JOIN Headers ON Test2OS.headerID = Headers.ID 
+          WHERE Test2OS.OSID = '"},
+          ostable()[input$os_rows_selected,1],
+          "' ORDER by Test2OS.Sort;")
         )
       )[,.(
         Sort, Millennium=TestID, `Millennium Name`, Header,
@@ -118,15 +136,15 @@ shinyServer(function(session,input, output) {
           buttons = c('copy','csv','pdf','excel','print'),
           autoWidth = TRUE,
           scrollX = TRUE,
-          columnDefs = list(list(
-            targets = c(2,13,14),
-            width = '5%'
+          # columnDefs = list(list(
+          #   targets = c(2,13,14),
+          #   width = '5%'
             #   render = JS(
             #     "function(data, type, row, meta) {",
             #     "return type === 'display' && data.length > 40 ?",
             #     "'<span title=\"' + data + '\">' + data.substr(0, 40) + '...</span>' : data;",
             #     "}"),
-          )),
+          # )),
           pageLength = 10)
       ) %>% formatStyle(columns = c(2,13,14), width='200px') # end datatable
     }else{
@@ -200,6 +218,9 @@ shinyServer(function(session,input, output) {
         osTestTable()[input$indos_rows_selected,.(Questions)],
         rownames=FALSE,options=list(dom='t')        
       ))
+    output$tchanges = renderDT(
+      datatable(dbGetQuery(pool,paste('SELECT ChangeType, ChangeRequested, Comment FROM Changes WHERE Millennium = ',seltest$ID)))
+    )
   }) # end observeEvent input$indos_rows_selected
   
   ### create modal of OS based on test selected, either on Compendium Mapping or Individual Order Sets Tab
@@ -239,7 +260,6 @@ shinyServer(function(session,input, output) {
     updateTabsetPanel(session,'TabSet1',selected ='individualOS')
     removeModal()
   })
-  
   ######################### OS STATS ################################
   output$osByTime <- renderPlot({
     clgs <- input$clgs
@@ -280,15 +300,18 @@ shinyServer(function(session,input, output) {
     if(all(anal == c("All","Analysts")))
       anal <- unique(ostable()[,.(FirstName,LastName)])  
     dt <- rbind(
-      # ostable()[CLG%in%clgs,.N,by=Status],
-      ostable()[CLG%in%clgs & grepl("preparation",Status,ignore.case = T) & 
-                FirstName %in% anal$FirstName & LastName %in% anal$LastName,.(Status='In Preparation',.N)],
-      ostable()[CLG%in%clgs & grepl("discussion",Status,ignore.case = T)& 
-                FirstName %in% anal$FirstName & LastName %in% anal$LastName,.(Status='In Discussion',.N)],
-      ostable()[CLG%in%clgs & grepl("approved",Status,ignore.case = T)& 
-                FirstName %in% anal$FirstName & LastName %in% anal$LastName,.(Status='Total Approved',.N)],
-      ostable()[CLG%in%clgs & !is.null(DateSentToAnalyst)& 
-                FirstName %in% anal$FirstName & LastName %in% anal$LastName,.(Status='Sent to Analyst',.N)],
+      ostable()[CLG%in%clgs,.N,by=Status],
+      # ostable()[CLG%in%clgs & grepl("preparation",Status,ignore.case = T) & 
+      #           FirstName %in% anal$FirstName & LastName %in% anal$LastName,.(Status='In Preparation',.N)],
+      # ostable()[CLG%in%clgs & grepl("discussion",Status,ignore.case = T)& 
+      #           FirstName %in% anal$FirstName & LastName %in% anal$LastName,.(Status='In Discussion',.N)],
+      # ostable()[CLG%in%clgs & grepl("revision",Status,ignore.case = T) & 
+      #             FirstName %in% anal$FirstName & LastName %in% anal$LastName,.(Status='In Revision',.N)],
+      # ostable()[CLG%in%clgs & grepl("approved",Status,ignore.case = T)& 
+      #           FirstName %in% anal$FirstName & LastName %in% anal$LastName,.(Status='Total Approved',.N)],
+      # 
+      # ostable()[CLG%in%clgs & !is.null(DateSentToAnalyst)& 
+      #           FirstName %in% anal$FirstName & LastName %in% anal$LastName,.(Status='Sent to Analyst',.N)],
       ostable()[CLG%in%clgs & FirstName %in% anal$FirstName & LastName %in% anal$LastName,.(Status='GRAND TOTAL',.N)]
     )
     datatable(
@@ -336,17 +359,30 @@ shinyServer(function(session,input, output) {
   #### tests table ####
 
   output$tests <- renderDT({
-    sql <- "SELECT DISTINCT Millennium, CompendiumT.`Millennium Name`, ACTIVE_IND AS EpicAct, STATUS, EXTERNAL_ID AS EpicLAB, EPIC, CompendiumT.`EPIC NAME`, VolEast, WolWest AS VolWest, Top100, CODE, CORNELL, COLUMBIA, ALLEN, QUEENS, WESTCHESTER, LMHOnly, DefaultEpicComment, DefaultFunctionality, ChangeRequested, OtherComments, InSource FROM CompendiumT"
-    if(input$osonly)
-      sql <- paste(sql, "INNER JOIN Test2OS ON CompendiumT.Millennium = Test2OS.TestID")
+    sql <- {"
+    SELECT DISTINCT 
+      Millennium, CompendiumT.`Millennium Name`, ACTIVE_IND AS EpicAct, STATUS, 
+      EXTERNAL_ID AS EpicLAB, EPIC, CompendiumT.`EPIC NAME`, Count(Test2OS.OSID) AS OSCount, VolEast, WolWest AS VolWest, 
+      Top100, CODE, CORNELL, COLUMBIA, ALLEN, QUEENS, WESTCHESTER, LMHOnly, DefaultEpicComment, 
+      DefaultFunctionality, ChangeRequested, OtherComments, InSource, 
+      O_ACTIVITY_SUBTYPE_DISP AS Section, 
+      O_ACTIVITY_TYPE_DISP AS ResultType FROM CompendiumT "}
+    sql <- paste(sql, ifelse(input$osonly,"INNER JOIN","LEFT JOIN"),{"
+      Test2OS ON CompendiumT.Millennium = Test2OS.TestID
+    GROUP BY 
+      Millennium, `Millennium Name`, EpicAct, STATUS, 
+      EpicLAB, EPIC, `EPIC NAME`, VolEast, VolWest, 
+      Top100, CODE, CORNELL, COLUMBIA, ALLEN, QUEENS, WESTCHESTER, LMHOnly, DefaultEpicComment, 
+      DefaultFunctionality, ChangeRequested, OtherComments, InSource, Section, 
+      ResultType"})
     if(input$labsect !="All")
       sql <- paste0(
         sql,
         " WHERE ((CompendiumT.O_ACTIVITY_SUBTYPE_DISP)='",
         input$labsect,"')"
       )
-    sql <- paste(sql,'ORDER BY "Freq-1yr-SCM-West" DESC;')
-    Testdt(data.table(dbGetQuery(pool,sql))[order(VolWest,decreasing = T)])
+    dt <- data.table(dbGetQuery(pool,sql))[order(VolWest,decreasing = T)]
+     Testdt(dt)
     datatable(
       Testdt(),
       selection = 'single',
@@ -368,41 +404,63 @@ shinyServer(function(session,input, output) {
     seltest$Name <- Testdt()[input$tests_rows_selected,Millennium, `Millennium Name`]
     seltest$EAP <- Testdt()[input$tests_rows_selected,EPIC]
     seltest$EPIC <- Testdt()[input$tests_rows_selected,`EPIC NAME`]
-   }) # end event input$tests_rows_selected
-  output$AOEs <- renderDT({
-    req(input$tests_rows_selected)
-    datatable(
-      dbGetQuery(pool,paste(
-        "SELECT DTA, CDISPLAY AS 'AOE Text', CCODEVALUE FROM AOE WHERE CATN = ",seltest$ID,";")
-      ),caption = "AOEs Associated with the Selected Orderable Test"
-    )
-  }) # end output$AOEs
-  
-  ####### order maps ##########
-  output$ordermap <- renderDT({
-    req(input$tests_rows_selected)
-    datatable(
-      dbGetQuery(pool,paste(
-        "SELECT External_System, External_ID, External_Name, External_Status FROM ExternalMapping WHERE ExternalMapping.Code =",
-        seltest$EAP,";"
-      )),caption = "External Orderables Mapped to the Selected Orderable Test"
-    )
-  }) # end output$ordemap
-  
-  ######### DTA Table #######
-
-  output$DTAs <- renderDT({
-    req(input$tests_rows_selected)
-    DTAdt(dbGetQuery(pool,paste0(
-      "SELECT MEDMapsT.`DTA Name`, MEDMapsT.`DTA Mnemonic`, MEDMapsT.`DTA Type p=prompt` AS `DTA Type`, MEDMapsT.`DTA Mill Code` AS `DTA ID`,MEDMapsT.`Loinc Code`, MEDMapsT.`DTA MEDcode` AS `MEDcode` FROM MEDMapsT WHERE MEDMapsT.`Order Mill Code` = ",seltest$ID,";")
-    ))
-    datatable(
-      DTAdt(),selection = 'single',caption = "DTAs Associated with the Selected Orderable Test"
-    ) # end datatable
-  }) # end output$DTAs
+    output$tchanges2 = renderDT({
+      req(input$tests_rows_selected)
+      datatable(dbGetQuery(pool,paste('SELECT ChangeType, ChangeRequested, ResolutionDate, Comment FROM Changes WHERE Millennium = ',seltest$ID,';')),
+                caption = "Changes Requested",options=list(dom='t'))
+    })
+    output$defaultcomment = renderDT({
+      req(input$tests_rows_selected)
+      datatable(
+        dbGetQuery(pool,paste(
+          "SELECT DefaultEpicComment FROM CompendiumT WHERE Millennium = ",seltest$ID,";")
+        ),caption = "Default Epic Comment",options=list(dom='t',autoWidth = TRUE),rownames=FALSE)       
+    })
+    output$catalog <- renderDT({
+      req(input$tests_rows_selected)
+      datatable({
+        dt <- data.table(
+          dbGetQuery(pool,paste0("SELECT `Test Id`, `Test Number` FROM OnlineCatalog WHERE Millennium = '",seltest$ID,"';")))
+        dt[,.(`Test Number`,`Catalog`=sapply(`Test Id`,function(x) createLink(
+          link = paste0('https://www.testmenu.com/nyphcolumbia/Tests/',x),label = x)
+          ))]
+      },caption = "Online Catalog",options=list(dom='t',autoWidth = TRUE),escape=F,rownames=FALSE)
+    })
+    output$AOEs <- renderDT({
+      req(input$tests_rows_selected)
+      datatable(
+        dbGetQuery(pool,paste(
+          "SELECT DTA, CDISPLAY AS 'AOE Text', CCODEVALUE FROM AOE WHERE CATN = ",seltest$ID,";")
+        ),caption = "AOEs Associated with the Selected Orderable Test"
+      )
+    }) # end output$AOEs
+    
+    output$ordermap <- renderDT({
+      req(input$tests_rows_selected)
+      datatable(
+        dbGetQuery(pool,paste(
+          "SELECT External_System, External_ID, External_Name, External_Status FROM ExternalMapping WHERE ExternalMapping.Code =",
+          seltest$EAP,";"
+        )),caption = "External Orderables Mapped to the Selected Orderable Test"
+      )
+    }) # end output$ordemap
+    
+    output$DTAs <- renderDT({
+      req(input$tests_rows_selected)
+      DTAdt(dbGetQuery(pool,paste0(
+        "SELECT MEDMapsT.`DTA Name`, MEDMapsT.`DTA Mnemonic`, MEDMapsT.`DTA Type p=prompt` AS `DTA Type`, MEDMapsT.`DTA Mill Code` AS `DTA ID`,MEDMapsT.`Loinc Code`, MEDMapsT.`DTA MEDcode` AS `MEDcode` FROM MEDMapsT WHERE MEDMapsT.`Order Mill Code` = '",seltest$ID,"';")
+      ))
+      if(nrow(DTAdt())>0)
+        datatable(
+          DTAdt(),selection = 'single',caption = "DTAs Associated with the Selected Orderable Test"
+        ) # end datatable
+      else
+        NULL
+    }) # end output$DTAs
+  }) # end event input$tests_rows_selected
   
   ########### DTA Mappings #######
-
+  
   observeEvent(input$DTAs_rows_selected,{
     req(input$DTAs_rows_selected)
     selDTA(DTAdt()[input$DTAs_rows_selected,4])
@@ -417,326 +475,329 @@ shinyServer(function(session,input, output) {
     ) # end datatable
   }) # end output$dtamap
   
-  ############### feedback ###############
-  output$feedback <- renderDT({
+  ############## Compendium Changes Tab ###########
+  observeEvent(c(input$changeType,input$resolved),{
+    output$changeT <- renderDT({
+        sql <- {"
+          SELECT 
+            Changes.Millennium, `Millennium Name`, Changes.ChangeType, Changes.ChangeRequested, 
+            ResolutionDate, EPIC,`EPIC NAME`,EXTERNAL_ID AS LABNo, STATUS,
+            Count(Test2OS.OSID) AS OSCount,
+            OrderableDysplay,CommonName,CORNELL,COLUMBIA,ALLEN,QUEENS,WESTCHESTER,LMHOnly,
+            CODE,VolEast,WolWest,EpicNo,ACTIVE_IND,O_ACTIVITY_SUBTYPE_DISP AS Section, 
+            O_ACTIVITY_TYPE_DISP AS ResultType,OtherComments,InSource, ChangeID 
+          FROM ((Changes 
+          INNER JOIN CompendiumT ON Changes.Millennium = CompendiumT.Millennium)
+          LEFT JOIN Test2OS ON CompendiumT.Millennium = Test2OS.TestID)
+          GROUP BY
+            Millennium, `Millennium Name`, ChangeType, ChangeRequested, 
+            Comment,ResolutionDate, EPIC,`EPIC NAME`,LABNo, STATUS,
+          OrderableDysplay,CommonName,CORNELL,COLUMBIA,ALLEN,QUEENS,WESTCHESTER,LMHOnly,
+          CODE,VolEast,WolWest,EpicNo,ACTIVE_IND,Section, 
+          ResultType,OtherComments,InSource"} # end sql
+        sql <- paste(sql, "ORDER BY `Millennium Name`;")
+        dt <- data.table(dbGetQuery(pool,sql))
+        if(input$resolved) 
+          dt <- dt[is.na(ResolutionDate)]
+        if(isTruthy(input$changeType))
+          dt <- dt[ChangeType %in% input$changeType]
+        changesdt(dt)
+        datatable(
+          dt,
+          class = 'no wrap',
+          selection='single',
+          filter = 'top',
+          extensions = 'Buttons',
+          rownames = F,
+          options = list(
+            dom = 'Blfrtip',
+            buttons = c('copy', 'csv', 'pdf', 'excel','print'),
+            autoWidth = TRUE,
+            scrollX = TRUE,
+            columnDefs = list(list(width = '400px', targets = c(3,6))),
+            pageLength = 25
+          ) # end list
+        ) # end datatable
+    }) # end renderDT
+  }) # end observeEvent changetype
     
-  })
+  observeEvent(c(
+    input$changeT_rows_selected,
+    input$chngCommOk,
+    input$delComOk,
+    input$editComOk),{
+    req(input$changeT_rows_selected)
+    chgComdt(data.table(dbGetQuery(pool,paste0({"
+      SELECT 
+        Analysts.FirstName, Analysts.LastName, 
+        Feedback.Comment, Feedback.timestamp, Feedback.ID, Analysts.ID AS userID
+      FROM Feedback
+      INNER JOIN Analysts ON
+      Feedback.Commenter = Analysts.ID
+      WHERE Feedback.ChangeID = "},
+          changesdt()[input$changeT_rows_selected,ChangeID],
+      ";"))))
+    output$changeComm <- renderDT(
+      datatable(
+        chgComdt()[,1:3,with=F],
+        # class = 'no wrap',
+        selection='single',
+        filter = 'top',
+        extensions = 'Buttons',
+        rownames = F,
+        options = list(
+          dom = 'Blft',
+          buttons = c('copy', 'csv', 'pdf', 'excel','print'),
+          autoWidth = TRUE,
+          scrollX = TRUE,
+          columnDefs = list(list(width = '30px', targets = c(0,1))),
+          pageLength = 100
+        )
+      )
+    )
+  },ignoreInit = T,ignoreNULL = T) # end observer changeT_rows
   
-  ############## new order set ###########
-  newos <- reactiveValues(
-    epicno=character(),
-    clg=character(),
-    analystid=integer(),
-    ordersettitle=character(),
-    comment=character(),
-    ostype=character()
-  )
-  
-  observeEvent(
-    input$epicno,{
-      req(input$epicno!="")
-      if(input$epicno %in% 
-         dbGetQuery(
-           pool,
-           "SELECT DISTINCT `EPIC No` FROM OrderSetReview")[,1]){
-        showModal(modalDialog(
-          title="Stop","This order set number already exists"
-        ))
-      }else{
-        newos$epicno <- input$epicno
-      }
+  observeEvent(input$addchngcomm,{ # add comment ############
+    req(input$changeT_rows_selected)
+    if(!isTruthy(user$email)){
+      showModal(modalDialog("Please log in to modify"))
+      return()
     }
-  ) ##end of observeevent
-  
-  observeEvent(
-    input$analystid,{
-      newos$analystid <- as.numeric(input$analystid)
-    }) ##end of observeevent
-  
-  observeEvent(
-    input$clg,{
-      newos$clg <- input$clg
-    }) ##end of observeevent
-  
-  observeEvent(
-    input$ordersettitle,{
-      req(input$ordersettitle)
-      newos$ordersettitle <- input$ordersettitle
-    }) # end output$ordersettitle
-  
-  observeEvent(
-    input$comment,{
-      req(input$comment)
-      newos$comment <- input$comment
-    }) # end output$comment
-  
-  observeEvent(
-    input$ostype,{
-      newos$ostype <- input$ostype
-    }) ##end of observeevent
-  
-  observeEvent(input$send1,{
-    # double check some inputs (e.g analyst,ordertitle,CLG must be truthy)
-    if(is.null(newos$analystid)){
-      showModal(modalDialog(
-        title="Stop","You need to enter the analyst name"
-      ));return()}
-    if(!isTruthy(newos$ordersettitle)){
-      showModal(modalDialog(
-        title="Stop","You need to enter new order set title"
-      ));return()}
-    if(!isTruthy(newos$clg)){
-      showModal(modalDialog(
-        title="Stop","You need to enter the CLG"
-      ));return()}
     showModal(modalDialog(
-      'Update Order Table?',
-      footer =
-        tagList(
-          modalButton('Cancel'),
-          actionButton("updateOS", "OK"))))
-  }) # end input$send1 observer
+      title='Please enter comment',size = 'l',easyClose = T,
+      {output$selchgcomm <- renderPrint(
+        changesdt()[input$changeT_rows_selected,1:3,with=F]
+      )
+      fluidPage(
+        verbatimTextOutput('selchgcomm'),
+        textAreaInput('chngComm','Enter Comment:',width = '100%'),
+        hr(),
+        actionButton('chngCommOk',"Add Comment")
+      )}
+    ))
+  })
+
+  observeEvent(input$chngCommOk,{
+    req(isTruthy(input$chngComm))
+    cID <- changesdt()[input$changeT_rows_selected,ChangeID]
+    com <- input$chngComm
+    dbGetQuery(pool,paste0({'
+      INSERT INTO Feedback (`ChangeID`,`Comment`,`Commenter`)
+        VALUES ('},cID,', "',com,'", ',user$ID,');')
+    )
+    # print('done') ##
+    removeModal()
+  },ignoreNULL = T,ignoreInit = T)
   
-  #osproxy1 <- DT::dataTableProxy('newos')
-  
-  observeEvent(input$updateOS,{
-    newrow <- data.frame(
-      `Epic No`=newos$epicno,
-      `Order Set Name`=newos$ordersettitle,
-      `CLG`=newos$clg,
-      `Type`=newos$ostype,
-      `Analyst`=newos$analystid,
-      `General Comment`=newos$comment,
-      check.names = FALSE)
-    dbWriteTable(
-      pool,"OrderSetReview",
-      value = newrow,append=TRUE,row.names=F
+  observeEvent(input$delchngcomm,{ # del comment #########
+    req(input$changeT_rows_selected)
+    if(!isTruthy(user$email)){
+      showModal(modalDialog("Please log in to modify",easyClose = T))
+      return()
+    }
+    if(!isTruthy(input$changeComm_rows_selected)){
+      showModal(modalDialog('Please select Comment to delete',easyClose = T))
+      return()
+    }
+    chgComID(input$changeComm_rows_selected)
+    if(chgComdt()[chgComID(),userID] != user$ID){
+      showModal(modalDialog("You can only modify your own comments",easyClose = T))
+      return()
+    }
+    showModal(modalDialog(
+      title = "Delete selected comment?", easyClose = T,size='l',{
+        output$selchgcomm <- renderPrint(
+        changesdt()[input$changeT_rows_selected,1:3,with=F]
+        )
+        output$comm1 <- renderPrint(
+          chgComdt()[chgComID(),Comment]
+      )
+      fluidPage(
+        h5('Change requested'),
+        verbatimTextOutput('selchgcomm'),
+        h5('Comment'),
+        verbatimTextOutput('comm1'),
+        actionButton('delComOk','DELETE')
+      )
+      }))
+  })
+    
+  observeEvent(input$delComOk,{
+    cID <- changesdt()[input$changeT_rows_selected,ChangeID]
+    chID <- chgComdt()[chgComID(),ID]
+    dbGetQuery(pool,paste0({'
+      DELETE FROM Feedback 
+      WHERE (ChangeID = '},cID,' AND ID =',chID,');')
     )
     removeModal()
+  },ignoreNULL = T,ignoreInit = T)
+  
+  observeEvent(input$editchngcomm,{ # edit comment #########
+    req(input$changeT_rows_selected)
+    if(!isTruthy(user$email)){
+      showModal(modalDialog("Please log in to modify",easyClose = T))
+      return()
+    }
+    if(!isTruthy(input$changeComm_rows_selected)){
+      showModal(modalDialog('Please select Comment to edit',easyClose = T))
+      return()
+    }
+    chgComID(input$changeComm_rows_selected) ##
+    if(chgComdt()[chgComID(),userID] != user$ID){
+      showModal(modalDialog("You can only modify your own comments",easyClose = T))
+      return()
+    }
+    showModal(modalDialog(
+      title = "Edit selected comment", easyClose = T,size = 'l',
+      {output$selchgcomm <- renderPrint(
+        changesdt()[input$changeT_rows_selected,1:3,with=F]
+      )
+      fluidPage(
+        h5('Change requested'),
+        verbatimTextOutput('selchgcomm'),
+        textAreaInput('editchgcomm',label = "Comment",
+                      value = chgComdt()[input$changeComm_rows_selected,Comment]),
+        actionButton('editComOk','OK')
+      )
+      }))
   })
   
+  observeEvent(input$editComOk,{
+    cID <- changesdt()[input$changeT_rows_selected,ChangeID]
+    chID <- chgComdt()[chgComID(),ID]
+    dbGetQuery(pool,paste0({'
+      UPDATE Feedback 
+      SET Comment = "'},input$editchgcomm,
+      '" WHERE (ChangeID = ',cID,' AND ID = ',chID,');'))
+    removeModal()
+    },ignoreNULL = T,ignoreInit = T)
+  ############### user ##########################################
+  logModal <- function(){
+    modalDialog(
+      title='Hello, please enter password sent to your email',
+      fluidPage(
+        passwordInput('pswd','Password:',placeholder = '***')
+      ),
+      footer = tagList(
+        actionButton('userok',"OK"),
+        actionButton('resendpswd','(Re)send password to my email'))
+    ) # end modalDialog
+  } # end logModal function
+  
+  observeEvent(input$user,{
+    useremail <- strsplit(input$user," \\| ")[[1]][3]
+    if(isValidEmail(useremail)){
+      user$email <- useremail
+      user$ID <- dbGetQuery(pool,paste0(
+        "SELECT ID FROM Analysts WHERE Email ='",useremail,"';"))
+      user$role <- dbGetQuery(pool,paste0(
+        "SELECT Role FROM Analysts WHERE Email ='",useremail,"';"))
+      showModal(logModal())
+      }else{
+        # showModal(modalDialog("Invalid email; please contact administrator"))
+        user$email <- ""
+        user$ID <- NULL
+        user$role <- ""
+      } # end if
+    },ignoreInit = T) # end observer input$user
+  
+  observeEvent(input$userok,{
+    req(isTruthy(input$pswd))
+    if(input$pswd =='lKd' & isValidEmail(user$email)){
+      # showModal(modalDialog("Thanks! You can now change the database"))
+      removeModal()
+      people(data.table(dbGetQuery(
+        pool,paste('SELECT * FROM Analysts')))[Email==user$email])
+      print(people())
+      output$loggedUser <- renderUI(
+        fluidRow(
+          h2('Double-click any cell to edit incorrect information'),
+          DTOutput('userT')
+        ))
+      output$userT <- renderDT({
+        datatable(
+          people(),
+          list(dom = 't'),rownames=F,filter='none',selection = 'none',
+          editable = list(target = 'cell',disable = list(columns = c(0,0))))},
+        server = TRUE)
+    }else{ #### invalid email or password
+      showModal(modalDialog("Invalid password; please check your email"))
+      user$email <- ""
+      updateSelectInput(session,'user',selected = "")
+    }  
+  },ignoreNULL = T,ignoreInit = T)
+ 
+  observeEvent(input$userT_cell_edit, {
+    print(input$userT_cell_edit)
+    print('dt before')
+    print(people())
+    people(editData(people(), input$userT_cell_edit,'userT',rownames = FALSE))
+    print(people())
+    dbGetQuery(pool,paste0({'
+            UPDATE Analysts 
+            SET '},
+              colnames(people())[input$userT_cell_edit$col+1],' = "',input$userT_cell_edit$value,
+              {'", timestamp = CURRENT_TIMESTAMP
+            WHERE ID = '},people()[,ID],';'))
+    # replaceData(userProxy, dt, resetPaging = FALSE)  # important
+    
+    # the above steps can be merged into a single editData() call; see examples below
+  },ignoreInit = TRUE)
   
   
-  
-  
-  
-  ### Add tests to new order set (Test2OS table) ###
-  
-  #observeEvent(input$indos_rows_selected,{
-    #seltest$ID <- osTestTable()[input$indos_rows_selected,Millennium]
-    #seltest$Name <- osTestTable()[input$indos_rows_selected,`Millennium Name`]
-    #seltest$EAP <- osTestTable()[input$indos_rows_selected,EAP]
-    #seltest$EPIC <- osTestTable()[input$indos_rows_selected,`EPIC NAME`]
-    #if(!isTruthy(seltest$ID)) return()
-    #output$cernername = renderDT(
-      #datatable(
-        #osTestTable()[input$indos_rows_selected,.(`Millennium Name`)],
-        #rownames=FALSE,options=list(dom='t')        
-      #))
-    #output$epicname = renderDT(
-      #datatable(
-        #osTestTable()[input$indos_rows_selected,.(`EPIC NAME`)],
-        #rownames=FALSE,options=list(dom='t')        
-      #))
-    #output$verbiage = renderDT(
-      #datatable(
-        #osTestTable()[input$indos_rows_selected,.(Verbiage)],
-        #rownames=FALSE,options=list(dom='t')        
-      #))
-    #output$automation = renderDT(
-      #datatable(
-        #osTestTable()[input$indos_rows_selected,.(Automation)],
-        #rownames=FALSE, options=list(dom='t')       
-      #))
-    #output$questions = renderDT(
-      #datatable(
-        #osTestTable()[input$indos_rows_selected,.(Questions)],
-        #rownames=FALSE,options=list(dom='t')        
-      #))
-  #}) # end observeEvent input$indos_rows_selected
-
-  #output$ostests <- renderDT({
-  #  sql <- "SELECT * FROM Test2OS LIMIT 0"
-  #  OSTests(data.table(dbGetQuery(pool,sql))[order(TestID,decreasing = T)])
-  #  datatable(
-  #    OSTests(),
-  #    selection = 'single',
-  #    class = 'nowrap',
-  #    filter = 'top',
-  #    escape=F, rownames = F
-  #    #options = list(
-  #      #dom = 'Blfrtip',
-  #      #pageLength = 5)
-  #  ) # end datatable
-  #}) # end output$ostests
-  #
-  #
+  observeEvent(input$resendpswd,{
+    if(user$email=='jls2282@cumc.columbia.edu'){
+      send.mail(
+        smtp = list(host.name = "smtp.gmail.com", port = 465,
+                    user.name = "labknowledgedatabase@gmail.com",
+                    passwd = "gata4nkx25", ssl = TRUE),
+        authenticate = TRUE,
+        from='columbia.labmedicine@gmail.com',
+        to=input$user,
+        subject = 'Password for Online LabKnowledgeDtabase',
+        body = 'Hi, please use the following password (case sensitive): lKd')
+      showModal(modalDialog(paste('Email sent to',user$email)))
+    }
+  },ignoreInit = T)
+  # output$feedback <- renderDT({
   # 
-  #  output$ordersetreview <- renderDT({
-  #    sql <- sql <- "SELECT DISTINCT Analyst, CLG, `Order Set Name`, COUNT(*) AS `OS Count` FROM OrderSetReview GROUP BY Analyst, CLG, `Order Set Name`"
-  #    Ordersetreview(data.table(dbGetQuery(pool,sql))[order(Analyst,decreasing = T)])
-  #    datatable(
-  #      Ordersetreview(),
-  #      selection = 'single',
-  #      class = 'nowrap',
-  #      filter = 'top',
-  #      extensions = 'Buttons',
-  #      escape=F, rownames = F,
-  #      options = list(
-  #        dom = 'Blfrtip',
-  #        buttons = c('copy', 'csv', 'pdf', 'excel','print'),
-  #        pageLength = 5)
-  #    ) # end datatable
-  #  }) # end output$ordersetreview
-  #  }
-  #})
+  # })
   
-  #observeEvent(input$selectone,{
-    #if(input$selectone =='selecttest'){
-    #  #output$selecttestui <- renderUI({
-    #  output$ordersetreview = DT::renderDT({
-    #    function(input, output) {
-    #      # create a character vector of shiny inputs
-    #      shinyInput = function(FUN, len, id, ...) {
-    #        inputs = character(len)
-    #        for (i in seq_len(len)) {
-    #          inputs[i] = as.character(FUN(paste0(id, i), label = NULL, ...))
-    #        }
-    #        inputs
-    #      }}
-          #display table with checkbox buttons
-        #iris$checked<-''
-        #iris$checked[2:5]<-'checked=\"checked\"'
-        #iris[["Select"]]<-glue::glue('<input type="checkbox" name="selected" {iris$checked} value="{1:nrow(iris)}"><br>')
-        #DT::datatable(cbind(Pick=shinyInput(checkboxInput,"srows_",value=NULL,width=1)),
-    #    sql <- "SELECT DISTINCT Analyst, CLG, `Order Set Name`, COUNT(*) AS `OS Count` FROM OrderSetReview GROUP BY Analyst, CLG, `Order Set Name`"
-    #    Ordersetreview(data.table(dbGetQuery(pool,sql))[order(Analyst,decreasing = T)])
-    #    datatable(
-    #      Ordersetreview(),
-    #      selection = 'single',
-    #      class = 'nowrap',
-    #      filter = 'top',
-    #      extensions = 'Buttons',
-    #      escape=F, rownames = F,
-    #      options = list(
-    #        dom = 'Blfrtip',
-    #        buttons = c('copy', 'csv', 'pdf', 'print'), # excel crashes in my setup)
-    #        pageLength = 5)
-    #    ) # end datatable
-    #  }) # end output$ordersetreview
-    #  }# end renderUI
-    }#else if(input$selectone =='copyorderset'){
-      #output$copyordersetui <- renderUI({
-     # output$compendium <- renderDT({
-     #   sql <- "SELECT DISTINCT CompendiumT.`Millennium Name`, Millennium, `EPIC NAME`, EPIC, `EXTERNAL_ID`, COUNT(*) AS Volume
-     #   FROM CompendiumT"
-     #   if(input$testosonly)
-     #     sql <- paste(sql, "INNER JOIN Test2OS ON CompendiumT.Millennium = Test2OS.TestID")
-     #   sql <- paste(sql,'GROUP BY CompendiumT.`Millennium Name`, Millennium, `EPIC NAME`, EPIC, `EXTERNAL_ID` 
-     #                ORDER BY "Freq-1yr-SCM-West" DESC;')
-     #   Compendium(data.table(dbGetQuery(pool,sql))[order(Millennium,decreasing = T)])
-     #   datatable(
-     #     Compendium(),
-     #     selection = 'single',
-     #     class = 'nowrap',
-     #     filter = 'top',
-     #     extensions = 'Buttons',
-     #     escape=F, rownames = F,
-     #     options = list(
-     #       dom = 'Blfrtip',
-     #       buttons = c('copy', 'csv', 'pdf', 'print'), # excel crashes in my setup)
-     #       pageLength = 5)
-     #   ) # end datatable
-     # }) # end output$compendium
-      #})# end renderUI
-    #}
-  #)
-  
-    
-    
-  
-  ### radiobutton ###
-  #observeEvent(input$selectone,{
-  #  if(input$selectone =='selecttest'){
-  #     output$ordersetreview <- DT::renderDT({
-  #        sql <- "SELECT DISTINCT Analyst, CLG, `Order Set Name`, COUNT(*) AS `OS Count`
-  #        FROM OrderSetReview GROUP BY Analyst, CLG, `Order Set Name`"
-  #        Ordersetreview(data.table(dbGetQuery(pool,sql))[order(Analyst,decreasing = T)])
-  #        datatable(
-  #          Ordersetreview(),
-  #          selection = 'single',
-  #          class = 'nowrap',
-  #          filter = 'top',
-  #          extensions = 'Buttons',
-  #          escape=F, rownames = F,
-  #          options = list(
-  #            dom = 'Blfrtip',
-  #            buttons = c('copy', 'csv', 'pdf', 'print'), # excel crashes in my setup)
-  #            pageLength = 5)
-  #        ) # end datatable
-  #      }) # end output$ordersetreview
-  #    #})# end renderUI
-  #}else if(input$selectone =='copyorderset'){
-    #output$copyordersetui <- renderUI({
-  #    output$compendium <- renderDT({
-  #    sql <- "SELECT DISTINCT CompendiumT.`Millennium Name`, Millennium, `EPIC NAME`, EPIC, `EXTERNAL_ID`, COUNT(*) AS Volume
-  #    FROM CompendiumT"
-  #    if(input$testosonly)
-  #      sql <- paste(sql, "INNER JOIN Test2OS ON CompendiumT.Millennium = Test2OS.TestID")
-  #    sql <- paste(sql,'GROUP BY CompendiumT.`Millennium Name`, Millennium, `EPIC NAME`, EPIC, `EXTERNAL_ID` 
-  #                 ORDER BY "Freq-1yr-SCM-West" DESC;')
-  #    Compendium(data.table(dbGetQuery(pool,sql))[order(Millennium,decreasing = T)])
-  #    datatable(
-  #      Compendium(),
-  #      selection = 'single',
-  #      class = 'nowrap',
-  #      filter = 'top',
-  #      extensions = 'Buttons',
-  #      escape=F, rownames = F,
-  #      options = list(
-  #        dom = 'Blfrtip',
-  #        buttons = c('copy', 'csv', 'pdf', 'print'), # excel crashes in my setup)
-  #        pageLength = 5)
-  #    ) # end datatable
-  #  }) # end output$compendium
-    #})# end renderUI
-  #}
-  #})
-  
-  ### CompendiumT ###
-  #observeEvent(input$selectone,{
-   # if(input$selectone =='copyorderset'){
-  #output$compendium <- renderDT({
-    #sql <- "SELECT DISTINCT CompendiumT.`Millennium Name`, Millennium, `EPIC NAME`, EPIC, `EXTERNAL_ID` FROM CompendiumT"
-   # if(input$testosonly)
-      #sql <- paste(sql, "INNER JOIN Test2OS ON CompendiumT.Millennium = Test2OS.TestID")
-    #sql <- paste(sql,'ORDER BY "Freq-1yr-SCM-West" DESC;')
-    #OSTestdt(data.table(dbGetQuery(pool,sql))[order(Millennium,decreasing = T)])
-   # datatable(
-     # OSTestdt(),
-  #     selection = 'single',
-  #     class = 'nowrap',
-  #     filter = 'top',
-  #     extensions = 'Buttons',
-  #     escape=F, rownames = F,
-  #     options = list(
-  #       dom = 'Blfrtip',
-  #       buttons = c('copy', 'csv', 'pdf', 'print'), # excel crashes in my setup)
-  #       pageLength = 5)
-  #   ) # end datatable
-  # }) # end output$compendium
-  # }}
-  # )
-  
-  observeEvent(input$send2,{
-    showModal(modalDialog(
-      'Are you sure you want to complete the order set and send to PathEpic?',
-      footer =
-        tagList(
-          modalButton('Cancel'),
-          actionButton("updateOS", "OK"))))
-  }) # end input$send2 observer
+  ############### dups tab ##############
+  observeEvent(input$campus3,{
+    sql <- paste0({"
+      SELECT
+        CompendiumT.EPIC,  EXTERNAL_ID AS LABNo, `EPIC Name`, Millennium, `Millennium Name`,  
+        O_ACTIVITY_SUBTYPE_DISP AS Section, O_ACTIVITY_TYPE_DISP AS ResultType,  ACTIVE_IND
+      FROM CompendiumT
+      INNER JOIN (
+        SELECT 
+          EPIC, Count(CompendiumT.Millennium) AS CountOfMillennium, "},
+          toupper(input$campus3),
+          {" FROM CompendiumT
+          GROUP BY EPIC, STATUS, "},toupper(input$campus3),{"  
+          HAVING (((Count(CompendiumT.Millennium))>1) AND (("},toupper(input$campus3),{")='1') AND ((CompendiumT.STATUS)='A'))) AS C2 
+        ON CompendiumT.EPIC = C2.EPIC
+        WHERE CompendiumT."},toupper(input$campus3),{"='1'
+        ORDER by CompendiumT.EPIC;"
+      }) # end sql paste
+    dt <- data.table(dbGetQuery(pool,sql))
+    output$dupsT <- renderDT({
+      dtable <- datatable(
+        dt,rownames = FALSE,
+        options = list(
+          rowsGroup = list(0,1,2)))
+        path <- "./" # folder containing dataTables.rowsGroup.js
+        dep <- htmltools::htmlDependency(
+          "RowsGroup", "2.0.0", 
+          path, script = "dataTables.rowsGroup.js")
+        dtable$dependencies <- c(dtable$dependencies, list(dep))
+        dtable
+    }) # end renderDT
+  },ignoreInit = T) # end input$campus observer
 
+  ############## new order set ###########
+  
   
   
   ############### troubleshot #############
@@ -750,6 +811,5 @@ shinyServer(function(session,input, output) {
   })
   
   
-  #####################################################################  
- }
-)# END shinyServer
+  ###################### END ###############################################  
+}) # END shinyServer
