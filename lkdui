@@ -1,0 +1,214 @@
+### LKD ####
+shinyUI(
+  fluidPage(
+    # tags$head(
+    #   tags$style(HTML("hr {border-top: 1px solid #000000;}"))
+    # ),
+    titlePanel(title = "",windowTitle = "Laboratory Knowledge Database"),
+    tabsetPanel(
+      id='TabSet1',selected="ordersetlist",
+      tabPanel(
+        'User Log IN',value = 'login',
+        fluidPage(
+          column(
+            3,
+            selectInput(
+              'user','Please select your name to be able to edit',
+              choices=c("",
+                        data.table(
+                          dbGetQuery(
+                            pool,{'
+                              SELECT
+                                Analysts.`FirstName`, 
+                                Analysts.`LastName` ,
+                                Analysts.Email
+                              FROM Analysts 
+                              ORDER by FirstName;'}))[,apply(na.omit(.SD),1,paste,collapse=" | ")]),
+              selected = "",multiple = F,
+              ),tags$style(type='text/css', ".selectize-dropdown-content {max-height: 400px; }")), # END USER EMAIL COLUMN
+          column(6,a(actionButton(
+            inputId = "admemail",
+            label = "Contact Admin if your name is not present",
+            icon = icon("envelope", lib = "font-awesome")),
+            href="mailto:jorges1000@gmail.com")),
+          column(12,uiOutput('loggedUser'))
+        ), # end fluidPage
+        splitLayout(
+          DTOutput('osfeedback'),
+          DTOutput('testfeedback')
+        ) # end splitLayout
+                        ), # end tabPanel "login" #################
+      tabPanel(
+        title= "All Tables",value='alltables',
+        fluidRow(
+          column(3,selectInput('tables',label = "Select Tables",choices = dbListTables(pool))),
+          column(1,checkboxInput('FullTables',label = "Show Full Table",value = FALSE)),
+          column(2,verbatimTextOutput("tableN"))
+        ), # end fluidRow
+        DTOutput('tableHead')
+      ), # end tabPanel "All Tables" ###################
+      tabPanel(
+        title="Order Set List", value='ordersetlist',
+        fluidRow(
+          DTOutput('os')
+        ) # end fluidRow
+      ), # end tabPanel "Order Set List" ######################
+      tabPanel(
+        title="Individual Order Sets",value='individualOS',
+        fluidRow(
+          column(6,verbatimTextOutput('osid')),
+          column(2,checkboxInput('wrap','Click if tests are not showing')),
+          column(2,actionButton('test2os','Show OS for selected test')),
+          column(2,actionButton('test2os3','Show OS for selected EAP')),
+          DTOutput('indos'),
+          column(6,DTOutput('cernername')),
+          # column(4,DTOutput('displayname')),
+          column(6,DTOutput(('epicname'))),
+          column(4,DTOutput('verbiage')),
+          column(4,DTOutput('automation')),
+          column(4,DTOutput('questions')),
+          column(12,DTOutput('tchanges'))
+          
+        ) # end fluidRow
+      ),# end tabPanel "Individual Order Sets" ###########################
+      tabPanel(
+        "Order Set Stats",value='osStats',
+        fluidPage(
+          fluidRow(
+            column(6,selectInput(
+              'clgs','Select CLGs',choices = dbReadTable(pool,'CLGs')$CLG,multiple = T
+            )),
+            column(6,selectInput(
+              'analyst','Select Analyst',
+              choices = c(
+                "All Analysts",
+                data.table(dbGetQuery(
+                  pool,{"
+                SELECT DISTINCT 
+                  Analysts.`FirstName`, Analysts.`LastName` 
+                FROM (OrderSetReview LEFT JOIN Analysts ON Analysts.ID = OrderSetReview.Analyst) 
+                  ORDER by FirstName;"}))[,apply(na.omit(.SD),1,paste,collapse=" ")]
+              ) # end c()
+            )) # end selectInput
+          ), # end FluidRow
+          fluidRow(
+            # tags$head(
+            #   tags$style(HTML("hr {border-top: 1px solid #000000;}"))
+            # ),
+            column(6,jqui_draggable(jqui_resizable(plotOutput('osByTime')))),
+            column(6,DTOutput('tabStats')),
+            column(12,hr()),
+            DTOutput('os1')
+          ) # end fluidRow
+        ) # end fluidPage
+      ),# end tabPanel "osStats" #############################
+      tabPanel(
+        "Compendium Mapping",value = "compendium.mapping",
+        fluidPage(
+          column(3,checkboxInput('osonly','Tests in OS Only',value = T)),
+          column(3,selectInput(
+            'labsect','Select Lab Section',
+            choices = c(
+              'All',
+              dbGetQuery(pool,"SELECT DISTINCT O_ACTIVITY_SUBTYPE_DISP FROM CompendiumT ORDER BY O_ACTIVITY_SUBTYPE_DISP")
+            ),selected = "All")),
+          column(2,actionButton('test2os2','Show OS for selected test')),
+          column(2,actionButton('test2os4','Show OS for selected EAP')),
+          DTOutput("tests"),
+          fluidRow(
+            column(6,DTOutput('tchanges2')),
+            column(4,DTOutput('defaultcomment')),
+            column(2,DTOutput('catalog'))),
+          hr(),
+          splitLayout(
+            column(4,DTOutput('AOEs')),
+            column(8,DTOutput('DTAs'))),
+          hr(),
+          splitLayout(
+            column(4,DTOutput('ordermap')),
+            column(8,DTOutput('DTAmap'))
+          ) # end splitLayout
+
+        ) # end fluidPage
+      ), # end tabPanel "Compendium Mapping" #############################
+ 
+      tabPanel(
+        'Duplicates',value='dups',
+        fluidPage(
+            selectInput(
+              'campus3','Select campus',
+              choices=c("",'Columbia','Cornell','Allen','Queens','LMHOnly','Westchester')),
+            DTOutput('dupsT')
+        ) # end fluidpage
+      ), # end tabPanel dups #######
+        # tabPanel(
+      #   'New Order Set', value = 'neworderset',
+      #   fluidPage(
+      #     verbatimTextOutput('trouble'),
+      #   column(1,textInput('epicno','Epic Number',
+      #                      placeholder='Enter Epic Order Set Number')),
+      #   column(3,selectInput(
+      #     'clg','CLG',choices = c("",dbGetQuery(
+      #       pool,"SELECT DISTINCT CLG FROM CLGs ORDER BY CLG")),
+      #     multiple = FALSE, selected = ""
+      #   )),
+      #   column(1,selectInput(
+      #     'ostype', 'Order Set Type', choices = dbGetQuery(
+      #       pool, "SELECT 'Order Set','Panel'"),
+      #     multiple = FALSE
+      #   )
+      #   ),
+      #   column(2,selectInput(
+      #     'analystid', 'Analyst', choices = c("",dbGetQuery(
+      #       pool,
+      #       "SELECT CONCAT(FirstName,' ', LastName, ' (',ID,')') FROM Analysts ORDER BY FirstName, LastName")),
+      #     multiple = FALSE, selected = ""
+      #     )
+      #   ),
+      #   # column(1,dateInput("datesent", "Date Sent")),
+      #   column(4,textInput('ordersettitle',"New Order Set Title")),
+      #   textAreaInput('comment',"Add any comments here"),
+      #   column(1,actionButton("send1", "Create Order Set"))
+      #   ) # end fluidPage
+      # ), # end of tabPanel "New order set" ####################
+      
+      # tabPanel(
+      #   'Add Tests', value = 'addtests',
+      #   DTOutput("ostests"),
+      #   column(2,checkboxInput('testosonly','Tests in OS Only',value = T)),
+      #   DTOutput("compendium"),
+      #   DTOutput("ordersetreview"),
+      #   #splitLayout(
+      #   #column(4,DTOutput('AOEs')),
+      #   #column(8,DTOutput('DTAs'))),
+      #   #splitLayout(
+      #   #column(4,DTOutput('ordermap')),
+      #   #column(8,DTOutput('DTAmap'))
+      #   
+      #   column(1,actionButton("send2", "Send"))
+      #   #) # end splitLayout
+      # ), # end of tabPanel "Add Tests" #######################
+      
+      tabPanel(
+        'Compendium Changes',value = 'compchanges',
+        # fixedPanel(
+        column(3,selectInput(
+          'changeType',label='Select Change Type',selected=NULL,multiple=TRUE,choices=
+            dbGetQuery(pool,"SELECT DISTINCT ChangeType FROM Changes ORDER BY ChangeType;"))),
+        column(2,checkboxInput('resolved',label = 'Exclude Resolved?',value = TRUE)),
+        column(12,hr()),
+        
+        h5('Comment'),
+        column(12,DTOutput('changeComm')),
+        column(3,actionButton('addchngcomm','Add Comment')),
+        column(3,actionButton('editchngcomm','Edit Selected Comment')),
+        column(3,actionButton('delchngcomm','Delete Selected Comment')),
+        column(12,hr()),
+        # ),
+        # fluidPage(
+        column(12,DTOutput('changeT'))
+      ) # end of tabPanel Compendium Changes ##########
+      ####################### END OF TABSET1 #############################
+    ) # end tabset1
+  ) # end fluidPage
+) # end shinyUI
