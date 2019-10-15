@@ -1,4 +1,5 @@
 ##### LKD #
+user=list(email='ny2306@cumc.columbia.edu',id=71,Role='Epic Analyst')
 shinyServer(function(session,input, output) {
   seltest <- reactiveValues(ID="", Name="", EAP=numeric(),EPIC="")
   # selLabNo <- reactiveVal()
@@ -13,9 +14,10 @@ shinyServer(function(session,input, output) {
   OSTests <- reactiveVal() # for new os tab
   OSTestdt <- reactiveVal() # for new os tab
   Ordersetreview <- reactiveVal()# for new os tab
+  ostnew <- reactiveVal()
   # user <- reactiveValues(email=character(),ID=numeric(), role=character()) # to track logedd in user
-  user <- reactiveValues(email='jls2282@cumc.columbia.edu',ID=60,role='Analyst') # REMOVE: DEV ONLY
-  # user <- reactiveValues(email='ny2306@cumc.columbia.edu',ID=71,role='Analyst') # REMOVE: DEV ONLY
+  # user <- reactiveValues(email='jls2282@cumc.columbia.edu',ID=60,role='Analyst') # REMOVE: DEV ONLY
+  # user <- reactiveValues(email='ny2306@cumc.columbia.edu',ID=71,role='Epic Analyst') # REMOVE: DEV ONLY
   changesdt <- reactiveVal() # for the entire Changes table
   chgComdt <- reactiveVal() # for the current row being changed in changes table
   chgComID <- reactiveVal() # to identify which comment is selected
@@ -797,7 +799,216 @@ shinyServer(function(session,input, output) {
   },ignoreInit = T) # end input$campus observer
 
   ############## new order set ###########
+  newos <- reactiveValues(
+    epicno=character(),
+    clg=character(),
+    analystid=integer(),
+    ordersettitle=character(),
+    comment=character(),
+    ostype=character()
+  )
   
+  observeEvent(input$createOS,{
+    if(!isTruthy(user$email)){
+      showModal(modalDialog("Please log in to modify",easyClose = T))
+      return()
+    }
+    if(!(user$Role=="Epic Analyst" | user$Role=='Db Admin')){
+      showModal(modalDialog("Only Epic analysts can enter new order sets"))
+      return()
+    }
+    showModal(modalDialog(
+      {
+        fluidPage(
+          column(2,textInput('epicno','Epic Number',
+                             placeholder='Enter Epic Order Set Number')),
+          column(4,selectInput(
+            'clg','CLG',choices = c("",dbGetQuery(
+              pool,"SELECT DISTINCT CLG FROM CLGs ORDER BY CLG")),
+            multiple = FALSE, selected = ""
+          )),
+          column(3,selectInput(
+            'ostype', 'Order Set Type', choices = dbGetQuery(
+              pool, "SELECT 'Order Set','Panel'"),
+            multiple = FALSE
+          )
+          ),
+          column(3,selectInput(
+            'analystid', 'Analyst', choices = c("",dbGetQuery(
+              pool,
+              "SELECT CONCAT(FirstName,' ', LastName, ' (',ID,')') FROM Analysts ORDER BY FirstName, LastName")),
+            multiple = FALSE, selected = ""
+          )
+          ),
+          # column(1,dateInput("datesent", "Date Sent")),
+          column(6,textInput('ordersettitle',"New Order Set Title")),
+          textAreaInput('comment',"Add any comments here"),
+          actionButton("send1", "Create Order Set")
+        ) # end fluidPage
+      },title = "Please fill the following fields",size = 'l'))
+  },ignoreInit = T) # end createOS
+  
+  
+  observeEvent(
+    input$send1,{
+      updateTabsetPanel(session,"TabSet1", selected='neworderset')
+      req(input$epicno!="")
+      if(input$epicno %in% 
+         dbGetQuery(
+           pool,
+           "SELECT DISTINCT `EPIC No` FROM OrderSetReview")[,1]){
+        showModal(modalDialog(
+          title="Stop","This order set number already exists"
+        ))
+      }else{
+        newos$epicno <- input$epicno
+      }
+      if(is.null(input$analystid)){
+        showModal(modalDialog(
+          title="Stop","You need to enter the analyst name"
+        ));return()}
+      newos$analystid <- as.numeric(gsub("[^0-9]","",input$analystid))
+      if(!isTruthy(input$clg)){
+        showModal(modalDialog(
+          title="Stop","You need to enter the CLG"
+        ));return()}
+      newos$clg <- input$clg
+      if(!isTruthy(input$ordersettitle)){
+        showModal(modalDialog(
+          title="Stop","You need to enter new order set title"
+        ));return()}
+      newos$ordersettitle <- input$ordersettitle
+      newos$comment <- input$comment
+      newos$ostype <- input$ostype
+      newrow1 <- data.table(
+        `Epic No`=newos$epicno,
+        `Order Set Name`=newos$ordersettitle,
+        `CLG`=newos$clg,
+        `Type`=newos$ostype,
+        `Analyst`=newos$analystid,
+        `General Comment`=newos$comment,
+        check.names = FALSE)
+      dbWriteTable( ### REMEBER TO UNCOMMNET FOR SQL UPDATE
+        pool,"OrderSetReview",
+        value = newrow1,append=TRUE,row.names=F
+      )
+      output$newosT <- renderDT(datatable(
+        cbind.data.frame(newrow1,dbGetQuery(
+          pool,
+          'SELECT IntOSID AS OsID from OrderSetReview Order BY 1 DESC LIMIT 1'))
+        ,options = list(
+          dom = 't')))
+      removeModal()
+      output$addtest <- renderUI(
+        fluidRow(
+          # actionButton('addTest'),
+          DTOutput("ostests")
+        )
+      )
+      
+      # double check some inputs (e.g analyst,ordertitle,CLG must be truthy)
+      
+    }) # end input$send1 observer
+  
+  
+  ### Add tests to new order set (Test2OS table) #####
+  output$osidnew <- renderText(
+    paste(ostnew()[,1:4],collapse =  " - ")
+  )
+  output$ostests <- renderDT({
+    sql <- "SELECT * FROM Test2OS LIMIT 0"
+    OSTests(data.table(dbGetQuery(pool,sql))[order(TestID,decreasing = T)])
+    datatable(
+      OSTests(),
+      selection = 'single',
+      class = 'nowrap',
+      filter = 'top',
+      extensions = 'Buttons',
+      escape=F, rownames = F,
+      options = list(
+        dom = 'Blfrtip',
+        buttons = c('copy', 'csv', 'pdf', 'print'), 
+        pageLength = 1)
+    ) # end datatable
+  }) # end output$ostests
+  
+  
+  ### Radiobutton ###
+  observeEvent(input$selectone,{
+    if(input$selectone =='selecttest'){
+      ### ordersetreview ###
+      output$ordersetreview <- renderDT({
+        sql <- "SELECT DISTINCT Analyst, CLG, `Order Set Name`, COUNT(*) AS `OS Count`
+        FROM OrderSetReview GROUP BY Analyst, CLG, `Order Set Name`"
+        Ordersetreview(data.table(dbGetQuery(pool,sql))[order(Analyst,decreasing = T)])
+        datatable(
+          Ordersetreview(),
+          selection = 'single',
+          class = 'nowrap',
+          filter = 'top',
+          extensions = 'Buttons',
+          escape=F, rownames = F,
+          options = list(
+            dom = 'Blfrtip',
+            buttons = c('copy', 'csv', 'pdf', 'print'), # excel crashes in my setup)
+            pageLength = 5)
+        ) # end datatable
+      }) # end output$ordersetreview
+      #hide("testosonly")
+      #hide("labsect")
+      #hide("compendium")
+    } # end input$selectone =='selecttest'
+    else if(input$selectone =='copyorderset'){
+      ### CompendiumT ###
+      output$compendium <- renderDT({
+        sql <- "SELECT DISTINCT CompendiumT.`Millennium Name`, Millennium, `EPIC NAME`, EPIC, `EXTERNAL_ID`, COUNT(*) AS Volume
+        FROM CompendiumT"
+        if(input$testosonly)
+          sql <- paste(sql, "INNER JOIN Test2OS ON CompendiumT.Millennium = Test2OS.TestID")
+        sql <- paste(sql,'ORDER BY "Freq-1yr-SCM-West" DESC;')
+        OSTestdt(data.table(dbGetQuery(pool,sql))[order(Millennium,decreasing = T)])
+        datatable(
+          OSTestdt(),
+          selection = 'single',
+          class = 'nowrap',
+          filter = 'top',
+          extensions = 'Buttons',
+          escape=F, rownames = F,
+          options = list(
+            dom = 'Blfrtip',
+            buttons = c('copy', 'csv', 'pdf', 'print'), # excel crashes in my setup)
+            pageLength = 5)
+        ) # end datatable
+      }) # end output$compendium
+    } # end input$selectone =='copyorderset'
+  }) # end radiobutton
+  
+  observeEvent(input$send2,{
+    showModal(modalDialog(
+      'Are you sure you want to complete the order set and send to PathEpic?',
+      footer =
+        tagList(
+          modalButton('Cancel'),
+          actionButton("sendtopathepic", "OK"))))
+  }) # end input$send2 observer
+  
+  observeEvent(input$sendtopathepic,
+               {
+                 sender <- "labknowledgedatabase@gmail.com"
+                 recipients <- c("ny2306@cumc.columbia.edu")
+                 body.string <- "words words words words words punchline"
+                 send.mail(from = sender,
+                           to = recipients,
+                           subject = "Test Mail",
+                           body = body.string,
+                           smtp = list(host.name = "smtp.gmail.com", port = 465, 
+                                       user.name = "labknowledgedatabase@gmail.com",            
+                                       passwd = "gata4nkx25", ssl = TRUE),
+                           authenticate = TRUE,
+                           send = TRUE)
+                 removeModal()
+               }
+  )
   
   
   ############### troubleshot #############
@@ -813,3 +1024,4 @@ shinyServer(function(session,input, output) {
   
   ###################### END ###############################################  
 }) # END shinyServer
+
