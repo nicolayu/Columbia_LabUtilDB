@@ -24,7 +24,7 @@ shinyUI(
                                 Analysts.Email
                               FROM Analysts 
                               ORDER by FirstName;'}))[,apply(na.omit(.SD),1,paste,collapse=" | ")]),
-              selected = "",multiple = F,
+              selected = "",multiple = F
               ),tags$style(type='text/css', ".selectize-dropdown-content {max-height: 400px; }")), # END USER EMAIL COLUMN
           column(6,a(actionButton(
             inputId = "admemail",
@@ -50,7 +50,8 @@ shinyUI(
       tabPanel(
         title="Order Set List", value='ordersetlist',
         fluidRow(
-          DTOutput('os')
+          column(1,actionButton("createOS", "Create New Order Set")),
+          column(12,DTOutput('os'))
         ) # end fluidRow
       ), # end tabPanel "Order Set List" ######################
       tabPanel(
@@ -188,6 +189,40 @@ shinyUI(
       #   column(1,actionButton("send2", "Send"))
       #   #) # end splitLayout
       # ), # end of tabPanel "Add Tests" #######################
+      
+      ##############################
+      tabPanel(
+        'New Order Set', value = 'neworderset',
+        fluidPage(
+          verbatimTextOutput('trouble'),
+          column(12,DTOutput('newosT')),
+          uiOutput('addtest')
+        ), # end fluidPage
+        sidebarLayout(
+          sidebarPanel(
+            radioButtons("selectone", "Select One: ",
+                         c("Select Test(s) Previously Used" = "selecttest",
+                           "Copy from Order Set" = "copyorderset"),
+                         selected = NULL)
+          ),
+          mainPanel(
+            DTOutput("ordersetreview"),
+            #uiOutput("MainBody"),
+            checkboxInput('testosonly','Tests in OS Only',value = T),
+            selectInput(
+              'labsect','Select Lab Section',
+              choices = c(
+                'All',
+                dbGetQuery(pool,{"
+                  SELECT DISTINCT O_ACTIVITY_SUBTYPE_DISP
+                  FROM CompendiumT 
+                  ORDER BY O_ACTIVITY_SUBTYPE_DISP"})
+                ),selected = "All"),
+            DTOutput("compendium"),
+            column(1,actionButton("send2", "Send"))
+                )
+              )#,
+          ), # end of tabPanel "New Order Set" #######################
       
       tabPanel(
         'Compendium Changes',value = 'compchanges',
