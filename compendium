@@ -1,0 +1,110 @@
+# Manipulate Compendium Files
+library(data.table)
+library(readr)
+library(stringr)
+library(VennDiagram)
+# setwd('~/Dropbox/LabKnowledgeBase/MillenniumFiles/')
+# files <- dir('./DAT/',pattern='*.dat|*.txt',full.names = T)
+
+
+delimRead <- function(file){
+  title <- readLines(file,1)
+  cols <- unlist(str_extract_all(title,boundary('word')))
+  start <- unlist(gregexpr('+\\w+',title))
+  end <- shift(start-1,-1)
+  if(length(grep('\t',readLines(file,100))))
+    a <- read_delim(file,'\t',trim_ws = T)
+  else{
+    a <- read_fwf(
+      file,col_positions = fwf_positions(start,end,cols),
+       trim_ws = T,skip = 1)
+    if(length(attr(a,'problems')))
+      a <- read_fwf(
+        file,col_positions = fwf_positions(start,end,cols),
+        col_types = paste(rep('c',length(cols)),collapse=""),
+        trim_ws = T,skip = 1)
+  }
+  return(a)
+}
+
+allMillenium <- list()
+for(file in files){
+  name <- str_remove(str_remove(basename(file),'\\.dat'),'vo_|zo_')
+  a <- try(delimRead(file))
+  if(class(a)=='try-error') 
+    a <- try(read.csv(file,sep='|',skipNul=T))
+  allMillenium[[name]] <- a
+}
+allMillenium$e_numer$TASK_ASSAY_CD=sapply(allMillenium$e_numer$TASK_ASSAY_CD, function(x)
+  as.numeric(x))
+allMillenium$r_vca_cares <- allMillenium$r_vca_cares.txt
+allMilleniumDT$r_vca_cares.txt <- NULL
+#### add a_alpha
+allMillenium$a_alpha <- openxlsx::readWorkbook('a_alpha.xlsx')
+#######
+allMillenium$med <- data.table(read.csv('../MED/MILL_191211',sep='|'))
+cols <- c('Order.Name','Order.Mnemonic','DTA.Name','DTA.Mnemonic',
+          'Other.Synonyms..Primary.and.Outreach.')
+allMilleniumDT$med[,(cols):=lapply(
+  .SD,function(x) 
+    gsub('\xa0'," ",x)),
+  .SDcols=cols]
+allMilleniumDT$med[,(cols):=lapply(
+  .SD,function(x) 
+    gsub('\x92s',"",x)),
+  .SDcols=cols]
+######
+library(pool)
+library(RMySQL)
+pool <- dbPool(
+  drv = MySQL(),
+  username ='lkbdb_admin',
+  password ='labknowledgedatabase', # fix for production
+  dbname='LabKnowledgeDatabase',
+  # host= 'testdb1.cres09btkks6.us-east-2.rds.amazonaws.com',
+  host= 'labknowledgedatabase.clmui8yfxppb.us-east-2.rds.amazonaws.com',
+  port=3306
+)
+allMillenium$comp <- data.table(dbGetQuery(pool,'SELECT * FROM CompendiumT'))
+allMillenium$epmap <- data.table(dbGetQuery(pool,'SELECT * FROM EPMap'))
+allMillenium$extmap <- data.table(dbGetQuery(pool,'SELECT * FROM ExternalMapping'))
+
+allMilleniumDT <- lapply(allMillenium,as.data.table)
+####
+save(allMilleniumDT,file='allMilleniumDT.rda')
+
+
+##### look at data ######
+names(allMilleniumDT)
+lapply(allMilleniumDT, colnames)
+lapply(allMilleniumDT, class)
+lapply(allMilleniumDT,attr,'problems')
+lapply(names(allMilleniumDT), function(x){
+  setkeyv(allMilleniumDT[[x]],OrdKeys[[x]])
+})
+
+allMilleniumDT$a_alpha[TASK_ASSAY_CD==317196 & grepl('W CNTRLNK',SERVICE_RESOURCE)]
+allMilleniumDT$a_alpha[TASK_ASSAY_CD==317196][order(SERVICE_RESOURCE,SEQUENCE)][,.(SERVICE_RESOURCE,SHORT_STRING,RESULT_FLAG)]
+allMilleniumDT$a_alpha[grepl('Ethanol Lvl',MNEMONIC)][order(SERVICE_RESOURCE,SEQUENCE)][,.(SERVICE_RESOURCE,SHORT_STRING,RESULT_FLAG)]
+allMilleniumDT$a_alpha[MNEMONIC=='DAU Interp'][order(SERVICE_RESOURCE,SEQUENCE)]
+
+med[DTA.Mill.Code==317196]
+med[DTA.Mill.Code==4312463]
+
+length(setdiff(unique(med$DTA.Mill.Code),unique(allMilleniumDT$g_wdtas$TASK_ASSAY_CD))) # 2119
+length(setdiff(unique(allMilleniumDT$g_wdtas$TASK_ASSAY_CD),unique(med$DTA.Mill.Code))) #1631
+
+#### create the excel file ####
+sapply(names(allMilleniumDT),function(i) sapply(allMilleniumDT[[i]],class)) -> cols
+unlist(sapply(1:length(cols),function(x) unlist(cols[x])))-> cols
+unlist(sapply(names(allMilleniumDT), function(x) apply(allMilleniumDT[[x]],2,function(i) length(unique(i)))))->uniques
+data.table(
+  file=str_split(names(cols),fixed('.'),2,simplify = T)[,1],
+  field=str_split(names(cols),fixed('.'),2,simplify = T)[,2],
+  class=cols,uniques=uniques,
+  width=unlist(sapply(names(allMilleniumDT), function(x) 
+    try(apply(apply(allMilleniumDT[[x]],2,nchar),2,max,na.rm=T)))),
+  examples=unlist(sapply(names(allMilleniumDT), function(x) apply(allMilleniumDT[[x]],2,function(i) 
+    paste(head(unique(i)),collapse='|'))))
+) -> a
+openxlsx::write.xlsx(a,file='flds.xlsx')
